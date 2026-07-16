@@ -1,0 +1,20 @@
+{
+  "name": "chatgpt-bridge",
+  "interface": {
+    "displayName": "ChatGPT Bridge"
+  },
+  "plugins": [
+    {
+      "name": "chatgpt-bridge",
+      "source": {
+        "source": "local",
+        "path": "./plugins/chatgpt-bridge"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Creativity"
+    }
+  ]
+}

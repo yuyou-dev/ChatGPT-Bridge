@@ -1,0 +1,43 @@
+{
+  "name": "chatgpt-bridge",
+  "version": "0.1.0",
+  "description": "Use your own ChatGPT browser session from Codex to generate, export, measure, and review image assets.",
+  "author": {
+    "name": "余悠",
+    "url": "https://github.com/yuyou-dev"
+  },
+  "homepage": "https://github.com/yuyou-dev/ChatGPT-Bridge",
+  "repository": "https://github.com/yuyou-dev/ChatGPT-Bridge",
+  "license": "MIT",
+  "keywords": [
+    "chatgpt",
+    "codex",
+    "image-generation",
+    "browser-automation",
+    "batch-images",
+    "manifest"
+  ],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "ChatGPT Bridge",
+    "shortDescription": "Generate and export ChatGPT images",
+    "longDescription": "Open ChatGPT in the Codex in-app browser, use the user's own signed-in subscription session, generate single images or coherent batches, export original assets, measure actual dimensions, and write review-ready manifests without collecting credentials.",
+    "developerName": "Yuyou",
+    "category": "Creativity",
+    "capabilities": [
+      "Interactive",
+      "Read",
+      "Write"
+    ],
+    "websiteURL": "https://github.com/yuyou-dev/ChatGPT-Bridge",
+    "defaultPrompt": [
+      "Use ChatGPT to generate one image and save the original locally.",
+      "Generate a coherent set of 9 images in ChatGPT and export them.",
+      "Check whether I am signed in to ChatGPT before generating images."
+    ],
+    "brandColor": "#10A37F",
+    "composerIcon": "./assets/icon.svg",
+    "logo": "./assets/logo.svg",
+    "screenshots": []
+  }
+}

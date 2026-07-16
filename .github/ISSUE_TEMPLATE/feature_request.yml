@@ -1,0 +1,23 @@
+name: Feature request
+description: Suggest an improvement to ChatGPT Bridge
+title: "[Feature]: "
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: User problem
+      description: Explain the workflow problem before proposing an implementation.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed behavior
+    validations:
+      required: true
+  - type: textarea
+    id: privacy
+    attributes:
+      label: Privacy and account impact
+      description: Describe any new browser, credential, upload, or manifest data involved.
