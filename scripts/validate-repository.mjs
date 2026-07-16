@@ -40,9 +40,15 @@ if (entry?.source?.path !== "./plugins/chatgpt-bridge") errors.push("marketplace
 const publicFiles = await walk(root, new Set([".git", "dist", "node_modules"]));
 const forbidden = [
   /\/Users\/[^/\s]+/,
+  /\/home\/[^/\s]+/,
+  /[A-Za-z]:\\Users\\[^\\\s]+/,
   /gho_[A-Za-z0-9_]+/,
+  /github_pat_[A-Za-z0-9_]{16,}/,
   /sk-[A-Za-z0-9_-]{16,}/,
-  /chatgpt\.com\/(?:c|share)\/[A-Za-z0-9-]+/
+  /AKIA[0-9A-Z]{16}/,
+  /chatgpt\.com\/(?:c|share)\/[A-Za-z0-9-]+/,
+  /https:\/\/chatgpt\.com\/backend-api\/files\//,
+  /(?:session|auth)[_-]?token\s*[:=]\s*["'][^"']+/i
 ];
 for (const file of publicFiles) {
   if (!/\.(?:md|json|mjs|js|yml|yaml|txt|svg)$/.test(file)) continue;

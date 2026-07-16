@@ -4,6 +4,19 @@ All notable changes to this project are documented here. The format follows Keep
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-07-17
+
+### Security
+
+- Prevented output writes through pre-existing symbolic links.
+- Removed absolute paths from ratio-mismatch and regeneration-queue manifest branches.
+- Stopped persisting prompt fingerprints by default and reduced session inspection data.
+
+### Fixed
+
+- Included governance and documentation files in marketplace release packages.
+- Added release tag/version validation and broader public-data scanning.
+
 ## [0.1.0] - 2026-07-17
 
 ### Added

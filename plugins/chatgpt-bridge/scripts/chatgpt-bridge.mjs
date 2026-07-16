@@ -1,4 +1,5 @@
-import { copyFile, mkdir, readFile, stat, writeFile } from "node:fs/promises";
+import { lstat, mkdir, open, readFile, stat, writeFile } from "node:fs/promises";
+import { constants as fsConstants } from "node:fs";
 import { createHash } from "node:crypto";
 import path from "node:path";
 
@@ -247,7 +248,7 @@ export async function inspectChatGPTSession(tab) {
         .slice(0, 250)
         .join("\n");
       const mainText = (document.querySelector("main")?.innerText || document.body?.innerText || "")
-        .slice(0, 16000);
+        .slice(0, 3000);
       return {
         hasComposer: Boolean(composer),
         controls,
@@ -275,10 +276,20 @@ export async function inspectChatGPTSession(tab) {
     status,
     ready: status === "ready",
     requiresUserAction: status === "signed_out" || status === "challenge",
-    currentUrl,
+    currentUrl: safeSessionLocation(currentUrl),
     hasComposer: page.hasComposer,
     guidance: sessionGuidance(status)
   };
+}
+
+function safeSessionLocation(value) {
+  try {
+    const url = new URL(value);
+    if (/\/auth\//i.test(url.pathname)) return `${url.origin}/auth/`;
+    return `${url.origin}/`;
+  } catch {
+    return "https://chatgpt.com/";
+  }
 }
 
 function sessionGuidance(status) {
@@ -467,6 +478,7 @@ export async function saveImagesFromPageAssets(tab, images, options = {}) {
     contentReviewStatus = reviewStatus,
     delivery = {},
     includePrompt = false,
+    includePromptHash = false,
     includeChatUrl = false,
     includeNotes = false,
     includeAbsolutePaths = false,
@@ -521,7 +533,7 @@ export async function saveImagesFromPageAssets(tab, images, options = {}) {
       extension
     });
     const filePath = safeOutputPath(outDir, filename);
-    await copyFile(exported.path, filePath);
+    await writeFileWithoutFollowingSymlinks(filePath, await readFile(exported.path));
     const fileStat = await stat(filePath);
     const bytes = await readFile(filePath);
     const dimensions = imageDimensions(bytes);
@@ -565,17 +577,6 @@ export async function saveImagesFromPageAssets(tab, images, options = {}) {
     });
   }
 
-  const validation = validateSavedImages(saved, {
-    expectedCount,
-    requestedRatio,
-    jobs,
-    contentReviewStatus
-  });
-  const regenerationQueue = buildRegenerationQueue(saved, validation, {
-    requestedRatio,
-    jobs
-  });
-
   const manifestFiles = saved.map((file) => ({
     ...file,
     file: includeAbsolutePaths ? file.file : path.relative(outDir, file.file) || file.filename,
@@ -583,12 +584,28 @@ export async function saveImagesFromPageAssets(tab, images, options = {}) {
       ? file.promptPath
       : path.basename(file.promptPath)
   }));
+  const portableJobs = jobs.map((job) => ({
+    ...job,
+    promptPath: includeAbsolutePaths || !(job.promptPath || job.prompt_path)
+      ? (job.promptPath || job.prompt_path || "")
+      : path.basename(job.promptPath || job.prompt_path)
+  }));
+  const validation = validateSavedImages(manifestFiles, {
+    expectedCount,
+    requestedRatio,
+    jobs: portableJobs,
+    contentReviewStatus
+  });
+  const regenerationQueue = buildRegenerationQueue(manifestFiles, validation, {
+    requestedRatio,
+    jobs: portableJobs
+  });
   const manifest = {
     schemaVersion: 2,
     generatedAt: new Date().toISOString(),
     campaignId,
     prompt: includePrompt ? prompt : "[omitted; pass includePrompt: true to persist]",
-    promptSha256: prompt ? checksumSha256(Buffer.from(prompt)) : "",
+    promptSha256: includePromptHash && prompt ? checksumSha256(Buffer.from(prompt)) : "",
     chatUrl: includeChatUrl ? chatUrl : "https://chatgpt.com/",
     notes: includeNotes ? notes : "",
     referenceFiles: referenceFiles.map((file) => includeAbsolutePaths ? file : path.basename(file)),
@@ -720,6 +737,37 @@ function safeOutputPath(outDir, filename) {
     throw new Error(`Refusing to write outside output directory: ${filename}`);
   }
   return resolved;
+}
+
+async function writeFileWithoutFollowingSymlinks(filePath, bytes) {
+  try {
+    const current = await lstat(filePath);
+    if (current.isSymbolicLink()) {
+      throw new Error(`Refusing to write through symbolic link: ${path.basename(filePath)}`);
+    }
+    if (!current.isFile()) {
+      throw new Error(`Refusing to replace non-file output target: ${path.basename(filePath)}`);
+    }
+  } catch (error) {
+    if (error?.code !== "ENOENT") throw error;
+  }
+
+  const flags = fsConstants.O_WRONLY
+    | fsConstants.O_CREAT
+    | fsConstants.O_TRUNC
+    | (fsConstants.O_NOFOLLOW || 0);
+  let handle;
+  try {
+    handle = await open(filePath, flags, 0o600);
+    await handle.writeFile(bytes);
+  } catch (error) {
+    if (error?.code === "ELOOP") {
+      throw new Error(`Refusing to write through symbolic link: ${path.basename(filePath)}`);
+    }
+    throw error;
+  } finally {
+    await handle?.close();
+  }
 }
 
 function redactDomImage(image) {

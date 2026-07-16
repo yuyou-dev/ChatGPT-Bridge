@@ -1,6 +1,6 @@
 {
   "name": "chatgpt-bridge",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Use your own ChatGPT browser session from Codex to generate, export, measure, and review image assets.",
   "author": {
     "name": "余悠",

@@ -1,4 +1,4 @@
-import { cp, mkdir, readFile, rename, rm } from "node:fs/promises";
+import { cp, mkdir, readFile, rm } from "node:fs/promises";
 import { spawnSync } from "node:child_process";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -19,7 +19,18 @@ zipDirectory(pluginStage, path.join(dist, `chatgpt-bridge-plugin-v${version}.zip
 
 const marketplaceStage = path.join(stage, `ChatGPT-Bridge-v${version}`);
 await mkdir(marketplaceStage, { recursive: true });
-for (const relative of [".agents", "plugins", "README.md", "README.zh-CN.md", "LICENSE", "CHANGELOG.md"]) {
+for (const relative of [
+  ".agents",
+  "plugins",
+  "docs",
+  "README.md",
+  "README.zh-CN.md",
+  "LICENSE",
+  "CHANGELOG.md",
+  "SECURITY.md",
+  "CONTRIBUTING.md",
+  "CODE_OF_CONDUCT.md"
+]) {
   await cp(path.join(root, relative), path.join(marketplaceStage, relative), { recursive: true });
 }
 zipDirectory(marketplaceStage, path.join(dist, `chatgpt-bridge-marketplace-v${version}.zip`));

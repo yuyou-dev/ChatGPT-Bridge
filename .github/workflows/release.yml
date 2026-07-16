@@ -16,6 +16,7 @@ jobs:
         with:
           node-version: 20
           cache: npm
+      - run: node scripts/check-release-tag.mjs "$GITHUB_REF_NAME"
       - run: npm run check
       - run: npm run package
       - name: Publish GitHub release

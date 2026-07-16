@@ -28,6 +28,7 @@ Requirements:
 - Codex desktop with plugin and in-app browser support.
 - A ChatGPT account. Image availability and limits depend on that account's plan and current ChatGPT product behavior.
 - Node.js 20 or newer for local helper scripts and development.
+- The `zip` command when building release packages locally. GitHub-hosted Linux runners already provide it.
 
 Add this repository as a Codex marketplace, then install the plugin:
 
