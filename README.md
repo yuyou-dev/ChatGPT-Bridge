@@ -12,11 +12,11 @@ It does not use an OpenAI API key, collect credentials, or copy browser cookies.
 
 ## What it does
 
-- Generates one image or a coherent batch of up to 9 independent images through ChatGPT.
+- Generates one image or guides a coherent batch workflow of up to 9 independent images through ChatGPT. Actual availability and limits depend on the signed-in account and current ChatGPT product surface.
 - Waits for the expected number of fresh images instead of accepting a partial batch.
 - Exports original page assets rather than screenshots.
 - Measures real dimensions and computes SHA-256 checksums.
-- Detects missing outputs, duplicate files, ratio mismatches, and review failures.
+- Detects missing outputs, duplicate files, and ratio mismatches, then records visual review status separately.
 - Writes appendable manifests and a regeneration queue.
 - Separates `Generated`, `Exported`, `Measured`, `Needs Review`, and `Approved` states.
 - Guides first-time users through safe ChatGPT sign-in in the Codex in-app browser.
@@ -29,8 +29,6 @@ Requirements:
 
 - Codex desktop with plugin and in-app browser support.
 - A ChatGPT account. Image availability and limits depend on that account's plan and current ChatGPT product behavior.
-- Node.js 20 or newer for local helper scripts and development.
-- The `zip` command when building release packages locally. GitHub-hosted Linux runners already provide it.
 
 Add this repository as a Codex marketplace, then install the plugin:
 
@@ -39,7 +37,16 @@ codex plugin marketplace add yuyou-dev/ChatGPT-Bridge
 codex plugin add chatgpt-bridge@chatgpt-bridge
 ```
 
-Start a new Codex task after installation so the new skill is loaded.
+Verify the marketplace and plugin are visible:
+
+```bash
+codex plugin marketplace list
+codex plugin list
+```
+
+The output should include the `chatgpt-bridge` marketplace and
+`chatgpt-bridge@chatgpt-bridge` plugin. Start a new Codex task after installation
+so the new skill is loaded.
 
 ## First sign-in
 
@@ -77,20 +84,27 @@ Use this reference image in ChatGPT, generate three independent variations, and 
 For a small one-off text task, the plugin can open Temporary Chat:
 
 ```text
-Temporarily rewrite this product title more concisely. I do not need the conversation history.
+Use Temporary Chat to rewrite this product title more concisely. I do not need the conversation history.
 ```
 
-Image generation currently remains in a clean standard chat because the verified ChatGPT Temporary Chat surface reports that image-generation tools are unavailable there.
+Ordinary image requests use a clean standard chat. If a user explicitly requests
+Temporary Chat for an image while that surface lacks image tools, the plugin blocks
+the incompatible request instead of silently changing modes.
 
 ## Conversation routing
 
 The router uses ordered, conservative rules:
 
-- explicit mode requests are honored unless they conflict with required existing context or an unsupported capability
+- explicit mode requests are honored unless they conflict with required existing context or an unsupported capability; conflicting explicit requests fail closed
 - existing conversation/history/attachments use `reuse_current`
 - image generation, 3-9 image batches, research, campaigns, and iterative work use `new_standard`
 - supported one-turn, one-off text work can use `new_temporary`
 - ambiguous requests default to a clean standard chat
+
+When Temporary Chat is selected automatically but cannot be activated, the router
+may fall back to a clean standard chat. An explicit Temporary Chat request never
+falls back silently. Verify that the ChatGPT surface shows the Temporary Chat
+indicator when that mode matters.
 
 Run the routing benchmark with:
 
@@ -137,6 +151,9 @@ Each GitHub release contains:
 The Git marketplace command above is the recommended installation method.
 
 ## Development
+
+Repository development requires Node.js 20 or newer. Building local release
+packages also requires the `zip` command.
 
 ```bash
 npm test

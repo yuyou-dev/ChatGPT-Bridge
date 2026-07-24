@@ -14,7 +14,18 @@ Ask it to immediately use image generation mode and produce the requested image 
 
 ## Temporary Chat says image generation is unavailable
 
-This is the currently verified ChatGPT product behavior. Do not wait or repeatedly retry. Open a clean standard chat and submit the image request there. The router does this automatically for image tasks.
+This was the verified ChatGPT product behavior on 2026-07-24. Do not wait or
+repeatedly retry. Ordinary image requests are routed to a clean standard chat.
+If you explicitly required Temporary Chat, the router blocks the incompatible
+request instead of silently changing modes. Remove the Temporary Chat requirement
+and submit the image request again if a standard chat is acceptable.
+
+## Temporary Chat was requested but is not active
+
+For automatically routed one-off text tasks, the bridge may fall back to a clean
+standard chat when Temporary Chat cannot be activated. Explicit Temporary Chat
+requests fail closed instead. When mode matters, confirm that ChatGPT visibly shows
+the Temporary Chat indicator before relying on the result.
 
 ## ChatGPT shows “Something went wrong” and a Retry button
 

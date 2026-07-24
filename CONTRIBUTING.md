@@ -6,8 +6,22 @@ Contributions are welcome through GitHub issues and pull requests.
 
 1. Install Node.js 20 or newer.
 2. Clone the repository.
-3. Run `npm run check`.
-4. For local Codex testing, run `npm run sync:global`, update the plugin cachebuster with the Codex plugin creator helper, reinstall the plugin, and start a new Codex task.
+3. Run the full local gate:
+
+   ```bash
+   npm run check
+   ```
+
+4. Sync the working plugin into a local global target:
+
+   ```bash
+   npm run sync:global -- --target=/path/to/global/chatgpt-bridge
+   ```
+
+5. Reinstall that local build through the marketplace or plugin-development flow
+   available in your Codex environment, then start a new Codex task. Confirm the
+   loaded plugin version from `plugins/chatgpt-bridge/.codex-plugin/plugin.json`
+   before testing.
 
 ## Pull requests
 
