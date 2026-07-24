@@ -4,6 +4,10 @@
 User request
   -> Codex skill router
   -> ChatGPT session preflight
+  -> conversation action router
+     -> new_temporary (supported one-off text)
+     -> new_standard (images/research/batches)
+     -> reuse_current (history or bounded Retry)
   -> Codex in-app browser at chatgpt.com
   -> image generation
   -> expected-count waiter
@@ -17,7 +21,7 @@ The plugin contains no background service and no API client. Browser control is 
 ## Main components
 
 - `skills/chatgpt-image-generator/SKILL.md`: orchestration, safety, login, single-image, and batch-image workflow.
-- `scripts/chatgpt-bridge.mjs`: session inspection, image collection, waiting, export, validation, and manifest helpers.
+- `scripts/chatgpt-bridge.mjs`: session inspection, conversation routing, Temporary Chat preparation, retry-aware waiting, export, validation, and manifest helpers.
 - `scripts/inspect-image-dimensions.mjs`: standalone local image inspection.
 
 ## Trust boundaries

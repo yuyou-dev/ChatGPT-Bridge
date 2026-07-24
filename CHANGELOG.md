@@ -4,6 +4,20 @@ All notable changes to this project are documented here. The format follows Keep
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-07-24
+
+### Added
+
+- Added conservative conversation routing with `new_temporary`, `new_standard`, `reuse_current`, and `blocked` actions.
+- Added Temporary Chat state inspection, verified activation, and automatic fallback rules.
+- Added retryable response-error detection and one bounded Retry recovery with mode/draft verification.
+- Added a reproducible routing benchmark covering explicit overrides, context reuse, research, campaigns, image capability boundaries, ambiguity, and retry behavior.
+
+### Changed
+
+- Image-generation requests now use clean standard chats because the verified ChatGPT Temporary Chat surface reports that image-generation tools are unavailable.
+- Image waiting now exits early on retry exhaustion or unsupported capabilities instead of polling until the full timeout.
+
 ## [0.1.1] - 2026-07-17
 
 ### Security

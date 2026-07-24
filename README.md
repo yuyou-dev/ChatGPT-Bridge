@@ -20,6 +20,8 @@ It does not use an OpenAI API key, collect credentials, or copy browser cookies.
 - Writes appendable manifests and a regeneration queue.
 - Separates `Generated`, `Exported`, `Measured`, `Needs Review`, and `Approved` states.
 - Guides first-time users through safe ChatGPT sign-in in the Codex in-app browser.
+- Routes supported one-off text tasks into ChatGPT Temporary Chat while keeping image, research, batch, and iterative work in standard chats.
+- Detects retryable ChatGPT response errors and performs one verified recovery instead of waiting until timeout.
 
 ## Install from GitHub
 
@@ -70,6 +72,30 @@ Generate exactly 9 independent training cards in one coherent visual system. Do 
 
 ```text
 Use this reference image in ChatGPT, generate three independent variations, and keep each result in Needs Review until I approve it.
+```
+
+For a small one-off text task, the plugin can open Temporary Chat:
+
+```text
+Temporarily rewrite this product title more concisely. I do not need the conversation history.
+```
+
+Image generation currently remains in a clean standard chat because the verified ChatGPT Temporary Chat surface reports that image-generation tools are unavailable there.
+
+## Conversation routing
+
+The router uses ordered, conservative rules:
+
+- explicit mode requests are honored unless they conflict with required existing context or an unsupported capability
+- existing conversation/history/attachments use `reuse_current`
+- image generation, 3-9 image batches, research, campaigns, and iterative work use `new_standard`
+- supported one-turn, one-off text work can use `new_temporary`
+- ambiguous requests default to a clean standard chat
+
+Run the routing benchmark with:
+
+```bash
+npm run benchmark:routing
 ```
 
 ## Output
@@ -124,6 +150,7 @@ Repository layout:
 .agents/plugins/marketplace.json
 plugins/chatgpt-bridge/
   .codex-plugin/plugin.json
+  skills/chatgpt-task-router/SKILL.md
   skills/chatgpt-image-generator/SKILL.md
   scripts/chatgpt-bridge.mjs
 scripts/

@@ -231,6 +231,278 @@ export function buildRegenerationQueue(saved, validation = {}, options = {}) {
   return queue;
 }
 
+const TEMPORARY_REQUEST = /临时对话|临时聊天|临时(?:任务|把|将|处理|改写|总结|翻译)|一次性|随手|快速|小任务|用完即走|不保留(?:上下文|历史)|temporary chat|one[- ]?off|quick task|do not retain/i;
+const PERSISTENT_REQUEST = /继续(?:这个|上次|当前)?对话|修改上一张|保留(?:上下文|历史)|复用(?:对话|上下文|附件)|多轮|迭代|深度研究|完整项目|系列|批量|组图|campaign|continue (?:this|the) chat|modify the previous|keep (?:the )?context|reuse|multi[- ]?turn|iterate|deep research|campaign|batch/i;
+const SINGLE_IMAGE_REQUEST = /(?:生成|制作|画|做).{0,12}(?:一张|1张|一个)?(?:图片|图像|海报|插画|图标|封面)|one (?:image|picture|poster|illustration|icon|cover)/i;
+const SMALL_TEXT_REQUEST = /(?:把|将).{0,40}(?:改写|缩短|精简|翻译|提取|分类|格式化)|(?:一句话|一句|三个关键词).{0,30}(?:总结|解释|概括|提取)|rewrite (?:this|the) (?:sentence|title)|translate (?:this|the) (?:sentence|title)|extract (?:three|3) keywords/i;
+
+export function classifyChatGPTConversationMode(task, options = {}) {
+  const input = normalizeConversationTask(task, options);
+  const explicitMode = normalizeConversationMode(input.explicitMode);
+  const existingReasons = [];
+  const persistentReasons = [];
+
+  if (input.requiresExistingConversation) existingReasons.push("requires existing conversation");
+  if (input.requiresExistingAttachments) existingReasons.push("requires existing attachments");
+  if (input.needsFutureContinuation) persistentReasons.push("needs future continuation");
+  if (input.needsUserIteration) persistentReasons.push("needs user-led iteration");
+  if (input.researchMode === "deep") persistentReasons.push("requires deep research");
+  if (input.productionMode === "campaign") persistentReasons.push("is a campaign or production run");
+  if (input.expectedTurns > 1 && input.retryMode === "none") persistentReasons.push(`expects ${input.expectedTurns} turns`);
+  if (input.imageCount > 2) persistentReasons.push(`requests ${input.imageCount} images`);
+  if (input.newReferenceImageCount > 2) persistentReasons.push(`uses ${input.newReferenceImageCount} new reference images`);
+  if (input.imageCount > 0 && !input.temporaryImageGenerationSupported) {
+    persistentReasons.push("Temporary Chat image generation is unavailable in the verified ChatGPT surface");
+  }
+  if (PERSISTENT_REQUEST.test(input.text)) persistentReasons.push("request language indicates persistent work");
+
+  if (explicitMode === "temporary" && existingReasons.length > 0) {
+    return routeDecision("temporary", "blocked", "explicit", "high", ["EXPLICIT_TEMPORARY_CONTEXT_CONFLICT"], existingReasons, input, {
+      blockers: existingReasons,
+      warnings: ["Temporary Chat cannot reuse history or attachments from another conversation."]
+    });
+  }
+
+  if (explicitMode === "temporary" && input.imageCount > 0 && !input.temporaryImageGenerationSupported) {
+    return routeDecision("temporary", "blocked", "explicit", "high", ["TEMPORARY_IMAGE_GENERATION_UNAVAILABLE"], [
+      "The verified ChatGPT Temporary Chat surface does not support image generation."
+    ], input, {
+      blockers: ["temporary image generation unavailable"],
+      warnings: ["Use a clean standard chat for image generation."]
+    });
+  }
+
+  if (explicitMode === "temporary") {
+    return routeDecision("temporary", "new_temporary", "explicit", "high", ["EXPLICIT_TEMPORARY"], ["Temporary Chat was explicitly requested."], input, {
+      warnings: persistentReasons.length > 0
+        ? [`Explicit Temporary Chat overrides complexity signals: ${persistentReasons.join("; ")}.`]
+        : []
+    });
+  }
+
+  if (explicitMode === "standard") {
+    return routeDecision("standard", existingReasons.length > 0 ? "reuse_current" : "new_standard", "explicit", "high", ["EXPLICIT_STANDARD"], ["Standard chat was explicitly requested."], input);
+  }
+
+  if (input.retryMode === "mechanical") {
+    return routeDecision(
+      input.currentConversationMode,
+      "reuse_current",
+      "automatic",
+      "high",
+      ["MECHANICAL_RETRY_REUSES_CURRENT"],
+      ["A bounded Retry action should remain in the current conversation."],
+      input
+    );
+  }
+
+  if (existingReasons.length > 0) {
+    return routeDecision("standard", "reuse_current", "automatic", "high", ["REQUIRES_EXISTING_CONTEXT"], existingReasons, input, {
+      blockers: existingReasons
+    });
+  }
+
+  if (persistentReasons.length > 0) {
+    return routeDecision("standard", "new_standard", "automatic", "high", ["PERSISTENT_OR_COMPLEX_TASK"], ["Persistent context is safer for this task."], input, {
+      blockers: persistentReasons
+    });
+  }
+
+  const oneOff = TEMPORARY_REQUEST.test(input.text) || SMALL_TEXT_REQUEST.test(input.text);
+  const smallTextTask = input.imageCount === 0 && input.expectedTurns <= 1;
+  if (oneOff && smallTextTask) {
+    return routeDecision("temporary", "new_temporary", "automatic", "high", ["ONE_OFF_TEXT_TASK"], [
+      "the request is a one-off task that can be completed in one turn without image generation"
+    ], input);
+  }
+
+  return routeDecision("standard", "new_standard", "fallback", "low", ["AMBIGUOUS_DEFAULT_STANDARD"], ["The task boundary is ambiguous, so a clean standard chat is safer."], input);
+}
+
+export async function inspectChatGPTConversationMode(tab) {
+  if (!tab?.playwright?.evaluate) {
+    throw new Error("inspectChatGPTConversationMode requires an in-app browser tab");
+  }
+  const page = await tab.playwright.evaluate(() => {
+    const controls = [...document.querySelectorAll("button, a, [role='button'], [role='menuitem']")].map((node) => ({
+      label: (node.getAttribute("aria-label") || node.innerText || node.getAttribute("title") || "").trim(),
+      pressed: node.getAttribute("aria-pressed") || "",
+      state: node.getAttribute("data-state") || ""
+    })).filter((item) => item.label);
+    return {
+      controls,
+      mainText: (document.querySelector("main")?.innerText || "").slice(0, 2500),
+      bannerText: (document.querySelector("header, [role='banner']")?.innerText || "").slice(0, 1000)
+    };
+  });
+  const temporaryControls = page.controls.filter((item) => /temporary chat|temporary conversation|临时对话|临时聊天/i.test(item.label));
+  const activation = temporaryControls.find((item) => /turn on|enable|开启|打开/i.test(item.label));
+  const active = temporaryControls.some((item) =>
+    /turn off|disable|关闭/i.test(item.label)
+    || /^(true|on)$/i.test(item.pressed)
+    || /^(active|checked|on|selected)$/i.test(item.state)
+  ) || /Temporary Chat|临时对话|临时聊天/i.test(page.bannerText)
+    || /^Temporary Chat\b|^临时(?:对话|聊天)/im.test(page.mainText);
+  return {
+    mode: active ? "temporary" : "standard",
+    temporaryAvailable: temporaryControls.length > 0,
+    temporaryActive: active,
+    activationLabel: activation?.label || "",
+    matchingControlCount: temporaryControls.length
+  };
+}
+
+export async function enableChatGPTTemporaryChat(tab, options = {}) {
+  const before = await inspectChatGPTConversationMode(tab);
+  if (before.temporaryActive) return { changed: false, before, after: before, error: "" };
+  if (!before.activationLabel || !tab?.playwright?.getByRole) {
+    return {
+      changed: false,
+      before,
+      after: before,
+      error: "Temporary Chat control was not visible."
+    };
+  }
+  const control = tab.playwright.getByRole("button", { name: before.activationLabel, exact: true });
+  const count = await control.count();
+  if (count !== 1) {
+    return { changed: false, before, after: before, error: `Temporary Chat control was ambiguous (${count} matches).` };
+  }
+  await control.click();
+  if (options.settleMs !== 0) await tab.playwright.waitForTimeout(options.settleMs || 1200);
+  const after = await inspectChatGPTConversationMode(tab);
+  return {
+    changed: after.temporaryActive,
+    before,
+    after,
+    error: after.temporaryActive ? "" : "Temporary Chat active state could not be verified after clicking."
+  };
+}
+
+export async function prepareChatGPTConversation(tab, task, options = {}) {
+  const decision = classifyChatGPTConversationMode(task, options);
+  if (decision.blocked) return { decision, prepared: false, fallback: false, error: decision.warnings[0] };
+  if (decision.action === "reuse_current") {
+    return { decision, prepared: true, fallback: false, mode: (await inspectChatGPTConversationMode(tab)).mode };
+  }
+  await tab.goto("https://chatgpt.com/");
+  if (decision.action === "new_standard") {
+    const current = await inspectChatGPTConversationMode(tab);
+    return { decision, prepared: current.mode === "standard", fallback: false, mode: current.mode };
+  }
+  const activation = await enableChatGPTTemporaryChat(tab, options);
+  if (activation.after?.temporaryActive) {
+    return { decision, prepared: true, fallback: false, mode: "temporary", activation };
+  }
+  if (decision.source === "explicit") {
+    return { decision, prepared: false, fallback: false, mode: "standard", activation, error: activation.error };
+  }
+  await tab.goto("https://chatgpt.com/");
+  const standard = await inspectChatGPTConversationMode(tab);
+  return {
+    decision: {
+      ...decision,
+      mode: "standard",
+      action: "new_standard",
+      reasonCodes: [...decision.reasonCodes, "TEMPORARY_UNAVAILABLE_FALLBACK"],
+      warnings: [...decision.warnings, activation.error]
+    },
+    prepared: standard.mode === "standard",
+    fallback: true,
+    mode: standard.mode,
+    activation
+  };
+}
+
+function normalizeConversationTask(task, options) {
+  const source = typeof task === "string" ? { text: task } : { ...(task || {}) };
+  const text = String(source.text || source.prompt || source.request || "");
+  return {
+    text,
+    explicitMode: source.explicitMode || source.explicit_mode || options.explicitMode || "",
+    expectedTurns: positiveInteger(source.expectedTurns ?? source.expected_turns ?? options.expectedTurns, 1),
+    imageCount: nonNegativeInteger(source.imageCount ?? source.image_count ?? options.imageCount, inferImageCount(text)),
+    newReferenceImageCount: nonNegativeInteger(
+      source.newReferenceImageCount ?? source.new_reference_image_count ?? source.referenceFileCount ?? source.reference_file_count ?? options.newReferenceImageCount ?? options.referenceFileCount,
+      Array.isArray(source.referenceFiles) ? source.referenceFiles.length : 0
+    ),
+    requiresExistingConversation: Boolean(
+      source.requiresExistingConversation ?? source.requires_existing_conversation ?? source.needsConversationHistory ?? source.needs_conversation_history ?? options.requiresExistingConversation ?? options.needsConversationHistory
+      ?? /继续(?:这个|上次|当前)?对话|修改上一张|continue (?:this|the) chat|modify the previous/i.test(text)
+    ),
+    requiresExistingAttachments: Boolean(source.requiresExistingAttachments ?? source.requires_existing_attachments ?? options.requiresExistingAttachments),
+    needsFutureContinuation: Boolean(source.needsFutureContinuation ?? source.needs_future_continuation ?? options.needsFutureContinuation),
+    needsUserIteration: Boolean(source.needsUserIteration ?? source.needs_user_iteration ?? source.needsIteration ?? source.needs_iteration ?? options.needsUserIteration ?? options.needsIteration),
+    researchMode: String(source.researchMode || source.research_mode || source.researchDepth || source.research_depth || options.researchMode || options.researchDepth || "none").toLowerCase(),
+    productionMode: String(source.productionMode || source.production_mode || (source.campaign || source.isCampaign || source.is_campaign ? "campaign" : "") || options.productionMode || (options.campaign ? "campaign" : "") || "single").toLowerCase(),
+    retryMode: String(source.retryMode || source.retry_mode || options.retryMode || "none").toLowerCase(),
+    currentConversationMode: normalizeConversationMode(
+      source.currentConversationMode || source.current_conversation_mode || options.currentConversationMode || "standard"
+    ) || "standard",
+    temporaryImageGenerationSupported: Boolean(
+      source.temporaryImageGenerationSupported
+      ?? source.temporary_image_generation_supported
+      ?? options.temporaryImageGenerationSupported
+      ?? false
+    )
+  };
+}
+
+function normalizeConversationMode(value) {
+  const mode = String(value || "").trim().toLowerCase();
+  if (["temporary", "temp", "临时", "临时对话", "临时聊天"].includes(mode)) return "temporary";
+  if (["standard", "persistent", "normal", "标准", "标准对话", "普通对话"].includes(mode)) return "standard";
+  return "";
+}
+
+function inferImageCount(text) {
+  const count = text.match(/(?:生成|制作|画|做|generate|create).{0,12}?(\d{1,2})\s*(?:张|幅|个|images?|pictures?)/i);
+  if (count) return Number(count[1]);
+  const words = [["九", 9], ["八", 8], ["七", 7], ["六", 6], ["五", 5], ["四", 4], ["三", 3], ["两", 2], ["一", 1]];
+  for (const [word, number] of words) {
+    if (new RegExp(`${word}张`).test(text)) return number;
+  }
+  return SINGLE_IMAGE_REQUEST.test(text) ? 1 : 0;
+}
+
+function positiveInteger(value, fallback) {
+  const number = Number(value);
+  return Number.isInteger(number) && number > 0 ? number : fallback;
+}
+
+function nonNegativeInteger(value, fallback) {
+  const number = Number(value);
+  return Number.isInteger(number) && number >= 0 ? number : fallback;
+}
+
+function routeDecision(mode, action, source, confidence, reasonCodes, reasons, input, extra = {}) {
+  return {
+    mode,
+    action,
+    blocked: action === "blocked",
+    source,
+    confidence,
+    reasonCodes,
+    reasons,
+    blockers: extra.blockers || [],
+    warnings: extra.warnings || [],
+    normalized: {
+      expectedTurns: input.expectedTurns,
+      imageCount: input.imageCount,
+      newReferenceImageCount: input.newReferenceImageCount,
+      requiresExistingConversation: input.requiresExistingConversation,
+      requiresExistingAttachments: input.requiresExistingAttachments,
+      needsFutureContinuation: input.needsFutureContinuation,
+      needsUserIteration: input.needsUserIteration,
+      researchMode: input.researchMode,
+      productionMode: input.productionMode,
+      retryMode: input.retryMode,
+      currentConversationMode: input.currentConversationMode,
+      temporaryImageGenerationSupported: input.temporaryImageGenerationSupported
+    }
+  };
+}
+
 export async function inspectChatGPTSession(tab) {
   if (!tab?.playwright?.evaluate || typeof tab.url !== "function") {
     throw new Error("inspectChatGPTSession requires an in-app browser tab");
@@ -376,6 +648,94 @@ export async function isChatGPTGenerating(tab) {
   return /stop generating|stop streaming|stop responding|stop answer|停止生成|停止回答|正在生成|generating image|creating image|image is being generated/i.test(text);
 }
 
+export async function inspectChatGPTResponseState(tab) {
+  const page = await tab.playwright.evaluate(() => {
+    const main = document.querySelector("main");
+    const mainText = (main?.innerText || "").slice(-6000);
+    const controls = [...(main || document).querySelectorAll("button, [role='button']")]
+      .map((node) => (node.getAttribute("aria-label") || node.innerText || "").trim())
+      .filter(Boolean);
+    const composer = document.querySelector(
+      "#prompt-textarea, textarea[data-testid*='prompt'], [contenteditable='true'][data-testid*='composer'], main [contenteditable='true']"
+    );
+    return {
+      mainText,
+      controls,
+      hasDraft: Boolean((composer?.value || composer?.innerText || composer?.textContent || "").trim())
+    };
+  });
+  const retryLabel = page.controls.find((label) => /^(retry|try again|重试|再试一次)$/i.test(label)) || "";
+  const sendLabel = page.controls.find((label) => /^(send prompt|send message|send|发送提示词|发送消息|发送)$/i.test(label)) || "";
+  const retryableError = /something went wrong while generating|there was an error generating|network error|response generation failed|生成回复时出错|生成响应时出错|网络错误/i.test(page.mainText);
+  const unsupportedCapability = /temporary chat.{0,80}(?:cannot|can't|does not|doesn't).{0,80}(?:image generation|generate images)|临时对话.{0,80}(?:无法|不能|不支持).{0,80}(?:图片生成|生成图片)/is.test(page.mainText);
+  return {
+    state: unsupportedCapability
+      ? "unsupported_capability"
+      : retryableError && retryLabel
+        ? "retryable_error"
+        : retryableError
+          ? "error"
+          : "normal",
+    retryAvailable: Boolean(retryLabel),
+    retryLabel,
+    hasDraft: page.hasDraft,
+    sendAvailable: Boolean(sendLabel),
+    sendLabel,
+    errorText: unsupportedCapability
+      ? "The current ChatGPT Temporary Chat surface does not support image generation."
+      : retryableError
+      ? extractResponseError(page.mainText)
+      : ""
+  };
+}
+
+export async function retryChatGPTResponse(tab, options = {}) {
+  const state = await inspectChatGPTResponseState(tab);
+  if (!state.retryAvailable || !state.retryLabel) {
+    return { retried: false, state, error: "No unique Retry control is available." };
+  }
+  const retry = tab.playwright.getByRole("button", { name: state.retryLabel, exact: true });
+  const count = await retry.count();
+  if (count !== 1) {
+    return { retried: false, state, error: `Retry control was ambiguous (${count} matches).` };
+  }
+  await retry.click();
+  if (options.settleMs !== 0) await tab.playwright.waitForTimeout(options.settleMs || 1000);
+  const recoveryActions = ["clicked_retry"];
+  let mode = await inspectChatGPTConversationMode(tab);
+  if (options.expectedConversationMode === "temporary" && mode.mode !== "temporary") {
+    const restored = await enableChatGPTTemporaryChat(tab, { settleMs: options.settleMs });
+    if (!restored.after?.temporaryActive) {
+      return {
+        retried: false,
+        state,
+        mode,
+        recoveryActions,
+        error: restored.error || "Temporary Chat could not be restored after Retry."
+      };
+    }
+    recoveryActions.push("restored_temporary_chat");
+    mode = restored.after;
+  }
+  const after = await inspectChatGPTResponseState(tab);
+  if (after.state === "normal" && after.hasDraft && after.sendAvailable) {
+    const send = tab.playwright.getByRole("button", { name: after.sendLabel, exact: true });
+    const sendCount = await send.count();
+    if (sendCount !== 1) {
+      return {
+        retried: false,
+        state,
+        mode,
+        recoveryActions,
+        error: `Recovered draft could not be submitted (${sendCount} Send controls).`
+      };
+    }
+    await send.click();
+    recoveryActions.push("resubmitted_recovered_draft");
+  }
+  return { retried: true, state, mode, recoveryActions, error: "" };
+}
+
 export async function waitForGeneratedImages(tab, options = {}) {
   const {
     expectedCount = 1,
@@ -386,7 +746,10 @@ export async function waitForGeneratedImages(tab, options = {}) {
     excludeSrcs = [],
     timeoutMs = 300000,
     pollMs = 3000,
-    settleMs = 2500
+    settleMs = 2500,
+    maxRetries = 1,
+    retrySettleMs = 1000,
+    expectedConversationMode = "standard"
   } = options;
 
   const startMs = Date.now();
@@ -396,6 +759,10 @@ export async function waitForGeneratedImages(tab, options = {}) {
   ];
   let latest = [];
   let lastBusy = false;
+  let retryCount = 0;
+  let terminalState = "waiting";
+  const errors = [];
+  const recoveryActions = [];
 
   while (Date.now() - startMs <= timeoutMs) {
     latest = await collectGeneratedImages(tab, {
@@ -406,6 +773,41 @@ export async function waitForGeneratedImages(tab, options = {}) {
       excludeSrcs: blockedSrcs
     });
     lastBusy = await isChatGPTGenerating(tab);
+    const responseState = await inspectChatGPTResponseState(tab);
+
+    if (responseState.state === "retryable_error") {
+      errors.push(responseState.errorText || "ChatGPT returned a retryable generation error.");
+      if (retryCount < maxRetries) {
+        const retry = await retryChatGPTResponse(tab, {
+          settleMs: retrySettleMs,
+          expectedConversationMode
+        });
+        if (retry.retried) {
+          retryCount += 1;
+          recoveryActions.push({
+            action: "retry",
+            attempt: retryCount,
+            atMs: Date.now() - startMs,
+            steps: retry.recoveryActions || []
+          });
+          continue;
+        }
+      }
+      terminalState = "retry_exhausted";
+      break;
+    }
+
+    if (responseState.state === "error") {
+      errors.push(responseState.errorText || "ChatGPT returned a generation error.");
+      terminalState = "error";
+      break;
+    }
+
+    if (responseState.state === "unsupported_capability") {
+      errors.push(responseState.errorText);
+      terminalState = "unsupported_capability";
+      break;
+    }
 
     if (latest.length >= expectedCount && !lastBusy) {
       if (settleMs > 0) {
@@ -418,6 +820,7 @@ export async function waitForGeneratedImages(tab, options = {}) {
           excludeSrcs: blockedSrcs
         });
       }
+      terminalState = "complete";
       break;
     }
 
@@ -426,6 +829,9 @@ export async function waitForGeneratedImages(tab, options = {}) {
 
   const waitedMs = Date.now() - startMs;
   const complete = latest.length >= expectedCount && !lastBusy;
+  if (terminalState === "waiting") {
+    terminalState = complete ? "complete" : "timed_out";
+  }
   const result = {
     expectedCount,
     freshCount: latest.length,
@@ -434,6 +840,10 @@ export async function waitForGeneratedImages(tab, options = {}) {
     timedOut: !complete && waitedMs >= timeoutMs,
     waitedMs,
     chatgptStillGenerating: lastBusy,
+    terminalState,
+    retryCount,
+    errors,
+    recoveryActions,
     images: latest.slice(-expectedCount),
     allFreshImages: latest,
     recoveryHint: latest.length === 0 && !lastBusy
@@ -451,6 +861,10 @@ export async function waitForGeneratedImages(tab, options = {}) {
         timedOut: result.timedOut,
         waitedMs: result.waitedMs,
         chatgptStillGenerating: result.chatgptStillGenerating,
+        terminalState: result.terminalState,
+        retryCount: result.retryCount,
+        errors: result.errors,
+        recoveryActions: result.recoveryActions,
         images: result.images.map(redactDomImage),
         allFreshImages: result.allFreshImages.map(redactDomImage),
         recoveryHint: result.recoveryHint
@@ -458,6 +872,17 @@ export async function waitForGeneratedImages(tab, options = {}) {
     }
   });
   return result;
+}
+
+function extractResponseError(text) {
+  const lines = String(text || "")
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean);
+  const match = lines.find((line) =>
+    /something went wrong while generating|there was an error generating|network error|response generation failed|生成回复时出错|生成响应时出错|网络错误/i.test(line)
+  );
+  return (match || "ChatGPT returned a generation error.").slice(0, 500);
 }
 
 export async function saveImagesFromPageAssets(tab, images, options = {}) {

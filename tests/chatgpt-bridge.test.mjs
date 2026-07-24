@@ -5,12 +5,17 @@ import os from "node:os";
 import path from "node:path";
 import {
   buildRegenerationQueue,
+  classifyChatGPTConversationMode,
+  enableChatGPTTemporaryChat,
   imageDimensions,
+  inspectChatGPTConversationMode,
+  inspectChatGPTResponseState,
   inspectChatGPTSession,
   parseRatio,
   ratioReport,
   saveImagesFromPageAssets,
   slugify,
+  waitForGeneratedImages,
   validateSavedImages
 } from "../plugins/chatgpt-bridge/scripts/chatgpt-bridge.mjs";
 
@@ -52,6 +57,92 @@ test("session inspection recognizes ready, signed-out, and challenge states", as
   assert.equal(signedOut.status, "signed_out");
   assert.equal(challenge.status, "challenge");
   assert.equal(challenge.requiresUserAction, true);
+});
+
+test("conversation router separates new temporary, new standard, and reuse", () => {
+  const small = classifyChatGPTConversationMode("临时把这句话改写得更简洁");
+  const image = classifyChatGPTConversationMode("快速生成一张 3:4 海报");
+  const batch = classifyChatGPTConversationMode({ text: "生成 9 张培训卡片", imageCount: 9 });
+  const continuation = classifyChatGPTConversationMode({ text: "继续这个对话修改上一张图", requiresExistingConversation: true });
+  assert.equal(small.action, "new_temporary");
+  assert.equal(image.action, "new_standard");
+  assert.equal(batch.action, "new_standard");
+  assert.equal(continuation.action, "reuse_current");
+});
+
+test("explicit Temporary Chat conflicts with required existing context", () => {
+  const decision = classifyChatGPTConversationMode({
+    text: "在临时对话继续修改上一张图",
+    explicitMode: "temporary",
+    requiresExistingConversation: true
+  });
+  assert.equal(decision.action, "blocked");
+  assert.equal(decision.blocked, true);
+});
+
+test("Temporary Chat inspection and activation verify active state", async () => {
+  let active = false;
+  const tab = temporaryModeTab(() => active, () => { active = true; });
+  const before = await inspectChatGPTConversationMode(tab);
+  const activated = await enableChatGPTTemporaryChat(tab, { settleMs: 0 });
+  assert.equal(before.mode, "standard");
+  assert.equal(activated.after.mode, "temporary");
+  assert.equal(activated.changed, true);
+});
+
+test("response-state inspection recognizes Retry errors", async () => {
+  const tab = responseTab({
+    mainText: "Something went wrong while generating the response.",
+    controls: ["Retry"]
+  });
+  const state = await inspectChatGPTResponseState(tab);
+  assert.equal(state.state, "retryable_error");
+  assert.equal(state.retryAvailable, true);
+});
+
+test("response-state inspection stops on unsupported Temporary Chat image generation", async () => {
+  const tab = responseTab({
+    mainText: "当前为临时对话，无法调用图片生成工具。",
+    controls: []
+  });
+  const state = await inspectChatGPTResponseState(tab);
+  assert.equal(state.state, "unsupported_capability");
+});
+
+test("image wait retries immediately instead of waiting for timeout", async () => {
+  let retried = false;
+  let polls = 0;
+  const tab = {
+    playwright: {
+      evaluate: async (fn) => {
+        const source = String(fn);
+        if (source.includes("document.images")) {
+          polls += 1;
+          return retried ? [{ src: "asset", width: 1024, height: 1024, alt: "result" }] : [];
+        }
+        if (source.includes("stop generating")) return "";
+        return retried
+          ? { mainText: "", controls: [] }
+          : { mainText: "Something went wrong while generating the response.", controls: ["Retry"] };
+      },
+      getByRole: () => ({
+        count: async () => 1,
+        click: async () => { retried = true; }
+      }),
+      waitForTimeout: async () => undefined
+    }
+  };
+  const result = await waitForGeneratedImages(tab, {
+    expectedCount: 1,
+    timeoutMs: 1000,
+    pollMs: 0,
+    settleMs: 0,
+    retrySettleMs: 0
+  });
+  assert.equal(result.complete, true);
+  assert.equal(result.retryCount, 1);
+  assert.equal(result.terminalState, "complete");
+  assert.equal(polls >= 2, true);
 });
 
 test("exports cannot escape outDir and manifests are private by default", async () => {
@@ -156,6 +247,34 @@ test("exports refuse pre-existing symbolic-link targets", async () => {
 function fakeTab(url, page) {
   return {
     url: async () => url,
+    playwright: {
+      evaluate: async () => page
+    }
+  };
+}
+
+function temporaryModeTab(getActive, activate) {
+  return {
+    playwright: {
+      evaluate: async () => ({
+        controls: [{
+          label: getActive() ? "Turn off temporary chat" : "Turn on temporary chat",
+          pressed: getActive() ? "true" : "false",
+          state: getActive() ? "active" : ""
+        }],
+        mainText: getActive() ? "Temporary Chat" : ""
+      }),
+      getByRole: () => ({
+        count: async () => 1,
+        click: async () => activate()
+      }),
+      waitForTimeout: async () => undefined
+    }
+  };
+}
+
+function responseTab(page) {
+  return {
     playwright: {
       evaluate: async () => page
     }

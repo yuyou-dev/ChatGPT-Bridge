@@ -1,0 +1,24 @@
+{
+  "schemaVersion": 1,
+  "cases": [
+    {"id":"explicit-temporary-text","task":{"text":"临时把这句话改写得更简洁","explicitMode":"temporary"},"expectedAction":"new_temporary"},
+    {"id":"explicit-temporary-image-blocked","task":{"text":"生成一张图","explicitMode":"temporary","imageCount":1},"expectedAction":"blocked"},
+    {"id":"explicit-standard","task":{"text":"快速生成一张图","explicitMode":"standard"},"expectedAction":"new_standard"},
+    {"id":"explicit-temporary-context-conflict","task":{"text":"继续上一张图","explicitMode":"temporary","requiresExistingConversation":true},"expectedAction":"blocked"},
+    {"id":"one-off-text","task":"临时把这段标题缩短","expectedAction":"new_temporary"},
+    {"id":"implicit-small-rewrite","task":"把这句话改写得更简洁","expectedAction":"new_temporary"},
+    {"id":"implicit-small-translation","task":"将这个标题翻译成英文","expectedAction":"new_temporary"},
+    {"id":"single-image","task":"生成一张极简图标","expectedAction":"new_standard"},
+    {"id":"two-images","task":{"text":"生成两张简单图标","imageCount":2},"expectedAction":"new_standard"},
+    {"id":"three-images","task":{"text":"生成三张海报","imageCount":3},"expectedAction":"new_standard"},
+    {"id":"nine-images","task":{"text":"生成 9 张培训卡","imageCount":9},"expectedAction":"new_standard"},
+    {"id":"continue-current","task":{"text":"继续这个对话修改上一张图","requiresExistingConversation":true},"expectedAction":"reuse_current"},
+    {"id":"existing-attachments","task":{"text":"复用当前附件生成图","requiresExistingAttachments":true},"expectedAction":"reuse_current"},
+    {"id":"user-iteration","task":{"text":"先出一张，我会继续修改","needsUserIteration":true,"expectedTurns":4,"imageCount":1},"expectedAction":"new_standard"},
+    {"id":"deep-research","task":{"text":"调研后生成封面","researchMode":"deep","imageCount":1},"expectedAction":"new_standard"},
+    {"id":"campaign","task":{"text":"季度活动主视觉","productionMode":"campaign","imageCount":1},"expectedAction":"new_standard"},
+    {"id":"reference-heavy","task":{"text":"根据四张新参考图生成一张图","newReferenceImageCount":4,"imageCount":1},"expectedAction":"new_standard"},
+    {"id":"ambiguous","task":"帮我处理一下","expectedAction":"new_standard"},
+    {"id":"retry-in-temporary","task":{"text":"重试刚才失败的一次性文本任务","retryMode":"mechanical","expectedTurns":2,"currentConversationMode":"temporary"},"expectedAction":"reuse_current","expectedMode":"temporary"}
+  ]
+}

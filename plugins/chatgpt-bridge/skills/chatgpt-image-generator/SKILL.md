@@ -9,6 +9,21 @@ Use this skill when the user wants image generation through the ChatGPT web UI a
 
 This skill coordinates the browser workflow; it does not use the OpenAI API. It relies on the user's own ChatGPT browser session and never asks for or stores account credentials.
 
+## Conversation Routing
+
+Before uploading files or sending a prompt, call `classifyChatGPTConversationMode(task)` or `prepareChatGPTConversation(tab, task)` when practical. Route before any external side effect.
+
+The router returns one of these actions:
+
+- `new_temporary`: open a clean Temporary Chat for a self-contained, one-turn task that does not need image generation.
+- `new_standard`: open a clean standard chat for image generation, research, campaigns, batches, or future iteration.
+- `reuse_current`: keep the current conversation when the task depends on its history/attachments, or when performing one bounded mechanical Retry.
+- `blocked`: stop when an explicit Temporary Chat request conflicts with required existing context or an unsupported capability.
+
+Current verified ChatGPT behavior does not support image generation in Temporary Chat. Route image requests to `new_standard`, even when the image task is small. Temporary Chat is useful for small one-off text tasks such as concise rewriting, extraction, classification, or translation. Treat this as a capability boundary that may change; do not infer support without verification.
+
+Automatic Temporary Chat activation may fall back to a clean standard chat when the control is unavailable. An explicit Temporary Chat request must fail closed instead of silently switching modes.
+
 ## Required Companion Skill
 
 Before browser work, use the `browser:control-in-app-browser` skill. Follow its setup exactly and use the in-app browser surface, not a separate browser automation mechanism. If that skill or the tab `pageAssets` capability is unavailable, stop with an actionable compatibility message; do not silently switch to Chrome, Playwright CLI, direct asset URLs, or an API.
@@ -32,12 +47,14 @@ The browser profile may retain the user's ChatGPT session across later tasks. Do
    - image count
    - output folder
    - file prefix
-   - whether existing ChatGPT conversation should be reused or a new chat should be opened
+   - whether existing ChatGPT conversation/history/attachments must be reused
    - whether reference images need to be uploaded
 
-2. Open or reuse ChatGPT:
-   - Prefer a new tab at `https://chatgpt.com/` for clean tests and new batches.
-   - Reuse the current ChatGPT conversation when the user asks to continue the current context.
+2. Route and prepare ChatGPT:
+   - Use the conversation router before uploads or prompt submission.
+   - Use a new standard chat for every image-generation request under the currently verified capability boundary.
+   - Use Temporary Chat only when the router returns `new_temporary` and its active state is verified.
+   - Reuse the current conversation only when the router returns `reuse_current`.
 
 3. Prepare the prompt:
    - Include count, subject, aspect ratio, background, product/model/campaign framing, and negative requirements.
@@ -55,6 +72,9 @@ The browser profile may retain the user's ChatGPT session across later tasks. Do
    - Prefer `waitForGeneratedImages` over one-off collection when an expected image count is known.
    - For batches, wait until the expected number of fresh image resources appears. Do not treat a partial batch, such as 7 of 9 images, as complete.
    - If no fresh images appear and ChatGPT is no longer generating, treat it as a likely text reply instead of an image reply and send a stricter generation-only correction.
+   - `waitForGeneratedImages` detects retryable response errors. It clicks one `Retry` by default instead of waiting until the full timeout.
+   - After Retry, verify the intended conversation mode. If ChatGPT returns to a blank page with the original prompt still in the composer, restore the intended mode and resubmit that recovered draft once.
+   - Stop immediately on `unsupported_capability`; do not keep polling for an image that Temporary Chat cannot generate.
 
 6. Export images:
    - Use the tab `pageAssets` capability.
@@ -225,12 +245,18 @@ Example use inside the Node-backed browser session after `tab` is selected:
 
 ```js
 const bridge = await import("/absolute/path/to/chatgpt-bridge/scripts/chatgpt-bridge.mjs");
+const route = bridge.classifyChatGPTConversationMode({
+  text: "Generate one image",
+  imageCount: 1
+});
+// Current verified behavior: route.action === "new_standard".
 const before = await bridge.snapshotGeneratedImages(tab, { minWidth: 500, minHeight: 500 });
 // send the image-generation prompt in ChatGPT, then wait for the expected count
 const generated = await bridge.waitForGeneratedImages(tab, {
   expectedCount: 9,
   beforeImages: before,
-  timeoutMs: 600000
+  timeoutMs: 600000,
+  expectedConversationMode: "standard"
 });
 if (!generated.complete) {
   nodeRepl.write(JSON.stringify(generated, null, 2));
@@ -310,6 +336,9 @@ When the user provides local reference images:
 
 ## Failure Handling
 
+- If ChatGPT shows a retryable error and a unique `Retry` button, let `waitForGeneratedImages` retry once. Record `retryCount`, `errors`, `recoveryActions`, and `terminalState`.
+- Do not repeatedly click Retry. A second failure returns `retry_exhausted`.
+- If Temporary Chat reports that image generation is unavailable, stop with `unsupported_capability` and route a new attempt to standard chat.
 - If ChatGPT is still generating, wait and re-check rather than saving placeholders.
 - If fewer images than requested appear, ask ChatGPT to continue only for the missing count.
 - If the batch is partial, preserve the manifest/checkpoint and retry only missing job IDs.

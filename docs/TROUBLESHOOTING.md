@@ -12,6 +12,14 @@ Sign in directly in the Codex in-app browser. Complete passwords, CAPTCHA, passk
 
 Ask it to immediately use image generation mode and produce the requested image assets without advice, JSON, or an outline.
 
+## Temporary Chat says image generation is unavailable
+
+This is the currently verified ChatGPT product behavior. Do not wait or repeatedly retry. Open a clean standard chat and submit the image request there. The router does this automatically for image tasks.
+
+## ChatGPT shows “Something went wrong” and a Retry button
+
+The waiter detects this state and clicks one unique `Retry` control. It then verifies the intended conversation mode and whether ChatGPT left the original prompt as an unsent draft. If recovery fails again, it returns `retry_exhausted` instead of waiting for the entire generation timeout.
+
 ## A 9-image batch stops at 7 images
 
 Do not export it as complete. Keep the partial checkpoint, ask ChatGPT for only the two missing job IDs, and append the exported files to the same manifest.

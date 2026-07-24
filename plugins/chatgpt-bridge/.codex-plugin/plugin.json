@@ -1,7 +1,7 @@
 {
   "name": "chatgpt-bridge",
-  "version": "0.1.1",
-  "description": "Use your own ChatGPT browser session from Codex to generate, export, measure, and review image assets.",
+  "version": "0.2.0",
+  "description": "Route Codex tasks into ChatGPT standard or Temporary Chat, then generate, export, measure, and review image assets.",
   "author": {
     "name": "余悠",
     "url": "https://github.com/yuyou-dev"
@@ -20,8 +20,8 @@
   "skills": "./skills/",
   "interface": {
     "displayName": "ChatGPT Bridge",
-    "shortDescription": "Generate and export ChatGPT images",
-    "longDescription": "Open ChatGPT in the Codex in-app browser, use the user's own signed-in subscription session, generate single images or coherent batches, export original assets, measure actual dimensions, and write review-ready manifests without collecting credentials.",
+    "shortDescription": "Route tasks and bridge ChatGPT",
+    "longDescription": "Open ChatGPT in the Codex in-app browser, route supported one-off work into Temporary Chat, keep image and persistent work in standard chats, recover bounded response errors, export original image assets, measure dimensions, and write review-ready manifests without collecting credentials.",
     "developerName": "Yuyou",
     "category": "Creativity",
     "capabilities": [
@@ -33,6 +33,7 @@
     "defaultPrompt": [
       "Use ChatGPT to generate one image and save the original locally.",
       "Generate a coherent set of 9 images in ChatGPT and export them.",
+      "Use Temporary Chat for this small one-off rewrite.",
       "Check whether I am signed in to ChatGPT before generating images."
     ],
     "brandColor": "#10A37F",

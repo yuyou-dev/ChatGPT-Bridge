@@ -1,0 +1,50 @@
+{
+  "schemaVersion": 1,
+  "date": "2026-07-24",
+  "surface": "Codex in-app browser / chatgpt.com",
+  "results": [
+    {
+      "id": "temporary-text-task",
+      "inputClass": "small one-off text rewrite",
+      "expectedAction": "new_temporary",
+      "actualAction": "new_temporary",
+      "temporaryModeVerified": true,
+      "responseReceived": true,
+      "status": "pass"
+    },
+    {
+      "id": "temporary-image-capability",
+      "inputClass": "single image generation",
+      "temporaryModeVerified": true,
+      "pageResult": "Temporary Chat reported that image generation was unavailable.",
+      "expectedTerminalState": "unsupported_capability",
+      "status": "capability-boundary-confirmed"
+    },
+    {
+      "id": "retryable-generation-error",
+      "inputClass": "single image generation",
+      "pageResult": "ChatGPT displayed a retryable response error and a unique Retry button.",
+      "recoveryObservation": "Retry returned to a clean standard page with the original prompt preserved as a draft.",
+      "expectedRecovery": "bounded Retry, mode verification, recovered-draft resubmission at most once",
+      "status": "pass"
+    },
+    {
+      "id": "standard-image-fallback",
+      "inputClass": "single image generation",
+      "expectedAction": "new_standard",
+      "actualAction": "new_standard",
+      "imageExported": true,
+      "actualDimensions": {
+        "width": 1254,
+        "height": 1254
+      },
+      "requestedRatio": "1:1",
+      "actualRatio": "1:1",
+      "waitedMs": 29528,
+      "retryCount": 0,
+      "terminalState": "complete",
+      "status": "pass"
+    }
+  ],
+  "conclusion": "Temporary Chat routing is suitable for supported one-off text work. Image generation should use a clean standard chat until the ChatGPT product surface exposes image tools in Temporary Chat."
+}
