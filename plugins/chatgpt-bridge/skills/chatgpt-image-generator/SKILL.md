@@ -77,7 +77,7 @@ The browser profile may retain the user's ChatGPT session across later tasks. Do
    - Stop immediately on `unsupported_capability`; do not keep polling for an image that Temporary Chat cannot generate.
 
 6. Export images:
-   - Use the tab `pageAssets` capability.
+   - Use the tab `pageAssets` capability for ordinary image URLs. For browser-local blob URLs, the helper opens the matching image and uses the ChatGPT viewer’s Download control to save the original bytes.
    - Do not navigate directly to temporary asset URLs just to fetch images.
    - Use `scripts/chatgpt-bridge.mjs` from this plugin to save images and write a manifest when practical.
 
