@@ -280,3 +280,48 @@ function responseTab(page) {
     }
   };
 }
+
+test("exports the viewer's original bytes for a blob-backed image", async (t) => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), "chatgpt-bridge-blob-"));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const original = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jPHsAAAAASUVORK5CYII=", "base64");
+  const downloadPath = path.join(directory, "original.png");
+  await writeFile(downloadPath, original);
+
+  const actions = [];
+  const image = { src: "blob:https://chatgpt.com/test", alt: "Generated image 1", width: 1, height: 1 };
+  const launcher = {
+    filter: () => ({
+      count: async () => 1,
+      click: async () => { actions.push("open"); }
+    })
+  };
+  const viewer = {
+    Download: { click: async () => { actions.push("download"); } },
+    "Close viewer": {
+      click: async () => { actions.push("close"); },
+      waitFor: async () => {}
+    }
+  };
+  const tab = {
+    capabilities: { get: async () => assert.fail("blob exports should not use pageAssets") },
+    playwright: {
+      locator: (selector) => {
+        assert.equal(selector, `img[src="${image.src}"]`);
+        return {};
+      },
+      getByRole: (_role, { name }) => name === image.alt ? launcher : viewer[name],
+      waitForEvent: async (event) => {
+        assert.equal(event, "download");
+        actions.push("listen");
+        return { path: async () => downloadPath };
+      }
+    }
+  };
+
+  const result = await saveImagesFromPageAssets(tab, [image], { outDir: path.join(directory, "exports") });
+  assert.deepEqual(actions, ["open", "listen", "download", "close"]);
+  assert.equal(result.count, 1);
+  assert.equal(result.files[0].exportMethod, "chatgpt_image_viewer_download");
+  assert.deepEqual(await readFile(result.files[0].file), original);
+});

@@ -924,29 +924,41 @@ export async function saveImagesFromPageAssets(tab, images, options = {}) {
 
   await mkdir(outDir, { recursive: true });
 
-  const capability = await tab.capabilities.get("pageAssets");
-  if (!capability?.list || !capability?.bundle) {
-    throw new Error("The Codex in-app browser pageAssets capability is unavailable. Install or enable the Browser capability, then retry in a new Codex task.");
-  }
-  const { inventory, targets } = await resolveImageAssetTargets(tab, capability, images, {
-    retries: assetResolveRetries,
-    waitMs: assetResolveWaitMs
-  });
-
-  const bundle = await capability.bundle({
-    inventoryId: inventory.id,
-    assetIds: targets.map(({ asset }) => asset.id)
-  });
-
-  if (bundle.failures.length > 0) {
-    throw new Error(`Failed to export ${bundle.failures.length} image asset(s): ${JSON.stringify(bundle.failures)}`);
+  const pageImages = images.filter((image) => !image.src?.startsWith("blob:"));
+  const bundledByImage = new Map();
+  if (pageImages.length) {
+    const capability = await tab.capabilities.get("pageAssets");
+    if (!capability?.list || !capability?.bundle) {
+      throw new Error("The Codex in-app browser pageAssets capability is unavailable. Install or enable the Browser capability, then retry in a new Codex task.");
+    }
+    const { inventory, targets } = await resolveImageAssetTargets(tab, capability, pageImages, {
+      retries: assetResolveRetries,
+      waitMs: assetResolveWaitMs
+    });
+    const bundle = await capability.bundle({
+      inventoryId: inventory.id,
+      assetIds: targets.map(({ asset }) => asset.id)
+    });
+    if (bundle.failures.length > 0) {
+      throw new Error(`Failed to export ${bundle.failures.length} image asset(s): ${JSON.stringify(bundle.failures)}`);
+    }
+    for (const { image, asset } of targets) {
+      const exported = bundle.assets.find((item) => item.id === asset.id);
+      if (!exported) throw new Error("The page asset bundle omitted a requested image.");
+      bundledByImage.set(image, exported);
+    }
   }
 
   const saved = [];
-  for (let index = 0; index < targets.length; index += 1) {
-    const { image, asset } = targets[index];
+  for (const [index, image] of images.entries()) {
     const job = jobs[index] || {};
-    const exported = bundle.assets.find((item) => item.id === asset.id) || bundle.assets[index];
+    const fromViewer = image.src?.startsWith("blob:");
+    const exported = fromViewer ? await downloadBlobBackedImage(tab, image) : bundledByImage.get(image);
+    const bytes = await readFile(exported.path);
+    const dimensions = imageDimensions(bytes);
+    if (fromViewer && (!dimensions.width || !dimensions.height)) {
+      throw new Error("ChatGPT's image viewer download did not contain a supported image.");
+    }
     const extension = extensionForAsset(exported);
     const jobId = job.jobId || job.job_id || "";
     const filenamePrefix = jobId ? slugify(jobId, prefix) : slugify(prefix, "chatgpt-image");
@@ -958,10 +970,8 @@ export async function saveImagesFromPageAssets(tab, images, options = {}) {
       extension
     });
     const filePath = safeOutputPath(outDir, filename);
-    await writeFileWithoutFollowingSymlinks(filePath, await readFile(exported.path));
+    await writeFileWithoutFollowingSymlinks(filePath, bytes);
     const fileStat = await stat(filePath);
-    const bytes = await readFile(filePath);
-    const dimensions = imageDimensions(bytes);
     const fileRequestedRatio = job.requestedRatio || job.requested_ratio || requestedRatio;
     saved.push({
       index: index + 1,
@@ -985,6 +995,7 @@ export async function saveImagesFromPageAssets(tab, images, options = {}) {
       bytes: fileStat.size,
       sha256: checksumSha256(bytes),
       contentType: exported.contentType,
+      exportMethod: fromViewer ? "chatgpt_image_viewer_download" : "page_assets",
       dimensions,
       actualWidth: dimensions.width,
       actualHeight: dimensions.height,
@@ -1066,6 +1077,33 @@ export async function saveImagesFromPageAssets(tab, images, options = {}) {
     validation,
     regenerationQueue
   };
+}
+
+// Blob URLs refer to in-page data. Use the viewer's original-file download.
+async function downloadBlobBackedImage(tab, image) {
+  const { playwright } = tab;
+  const matchingImage = playwright.locator(`img[src=${JSON.stringify(image.src)}]`);
+  const trigger = playwright.getByRole("button", { name: image.alt, exact: true })
+    .filter({ has: matchingImage, visible: true });
+  if (await trigger.count() !== 1) {
+    throw new Error("Could not uniquely identify the blob-backed ChatGPT image in the conversation.");
+  }
+  await trigger.click();
+  const close = playwright.getByRole("button", { name: "Close viewer", exact: true });
+  await close.waitFor({ state: "visible", timeout: 10000 });
+  try {
+    const downloadButton = playwright.getByRole("button", { name: "Download", exact: true });
+    const [download] = await Promise.all([
+      playwright.waitForEvent("download", { timeout: 25000 }),
+      downloadButton.click({ timeout: 10000 })
+    ]);
+    const downloadedPath = await download.path({ timeout: 10000 });
+    if (!downloadedPath) throw new Error("ChatGPT's image viewer download has no local file path.");
+    return { path: downloadedPath, name: path.basename(downloadedPath), contentType: null };
+  } finally {
+    await close.click({ timeout: 10000 });
+    await close.waitFor({ state: "hidden", timeout: 10000 });
+  }
 }
 
 async function resolveImageAssetTargets(tab, capability, images, options = {}) {
